@@ -25,6 +25,8 @@ DEFAULT_CONFIG = {
              'attributes': {'dc': 'example'}}
 }
 
+DEFAULT_GATEWAY_PORT = 25333
+DEFAULT_PYTHON_PROXY_PORT = 25334
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 JVM_SERVER_BIN = os.path.join(
     PACKAGE_DIR,
@@ -48,15 +50,17 @@ def server_cleanup():
 atexit.register(server_cleanup)
 
 
-def run_jvm_gateway():
+def run_jvm_gateway(port=DEFAULT_PYTHON_PROXY_PORT):
     try:
-        return JavaGateway(gateway_client=SlowGatewayClient(), eager_load=True)
+        return JavaGateway(gateway_client=SlowGatewayClient(),
+                           python_proxy_port=port,
+                           eager_load=True)
     except Py4JNetworkError:
         log.error("Failed to connect!")
         raise
 
 
-def run_jvm_server():
+def run_jvm_server(port=DEFAULT_GATEWAY_PORT):
     if not os.path.isfile(JVM_SERVER_BIN):
         raise Exception("%s is missing!" % (JVM_SERVER_BIN,))
 
@@ -66,9 +70,10 @@ def run_jvm_server():
         raise Exception("'java' executable not found in system path!")
 
     try:
-        return subprocess.Popen("exec %s -jar %s" % (
+        return subprocess.Popen("exec %s -jar %s --port %s" % (
             jre_executable,
-            JVM_SERVER_BIN), shell=True)
+            JVM_SERVER_BIN,
+            port), shell=True)
     except OSError as e:
         log.error("Failed to run JVM server because: %s" % (e,))
         raise
@@ -178,14 +183,16 @@ class ConfigBuilder(object):
 
 
 class LdapServer(object):
-    def __init__(self, config=None):
+    def __init__(self, config=None,
+                 java_gateway_port=DEFAULT_GATEWAY_PORT,
+                 python_proxy_port=DEFAULT_PYTHON_PROXY_PORT):
         global SERVER_PROCESS, JVM_GATEWAY
 
         if SERVER_PROCESS is None:
-            SERVER_PROCESS = run_jvm_server()
+            SERVER_PROCESS = run_jvm_server(java_gateway_port)
 
         if JVM_GATEWAY is None:
-            JVM_GATEWAY = run_jvm_gateway()
+            JVM_GATEWAY = run_jvm_gateway(python_proxy_port)
 
         self.server = JVM_GATEWAY.entry_point
         self.config, self._config_obj = \
