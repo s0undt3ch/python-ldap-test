@@ -50,17 +50,18 @@ def server_cleanup():
 atexit.register(server_cleanup)
 
 
-def run_jvm_gateway(port=DEFAULT_PYTHON_PROXY_PORT):
+def run_jvm_gateway(gateway_port=DEFAULT_GATEWAY_PORT,
+                    python_proxy_port=DEFAULT_PYTHON_PROXY_PORT):
     try:
-        return JavaGateway(gateway_client=SlowGatewayClient(),
-                           python_proxy_port=port,
-                           eager_load=True)
+        log.info('Starting the JavaGateway on python_proxy_port %s', python_proxy_port)
+        return JavaGateway(gateway_client=SlowGatewayClient(port=gateway_port),
+                           python_proxy_port=python_proxy_port)
     except Py4JNetworkError:
         log.error("Failed to connect!")
         raise
 
 
-def run_jvm_server(port=DEFAULT_GATEWAY_PORT):
+def run_jvm_server(gateway_port=DEFAULT_GATEWAY_PORT):
     if not os.path.isfile(JVM_SERVER_BIN):
         raise Exception("%s is missing!" % (JVM_SERVER_BIN,))
 
@@ -73,7 +74,7 @@ def run_jvm_server(port=DEFAULT_GATEWAY_PORT):
         return subprocess.Popen("exec %s -jar %s --port %s" % (
             jre_executable,
             JVM_SERVER_BIN,
-            port), shell=True)
+            gateway_port), shell=True)
     except OSError as e:
         log.error("Failed to run JVM server because: %s" % (e,))
         raise
@@ -81,7 +82,10 @@ def run_jvm_server(port=DEFAULT_GATEWAY_PORT):
 
 class SlowGatewayClient(GatewayClient):
     def _create_connection(self):
-        parameters = GatewayParameters(address=self.address, port=self.port, auto_close=self.auto_close)
+        parameters = GatewayParameters(address=self.address,
+                                       port=self.port,
+                                       auto_close=self.auto_close,
+                                       eager_load=True)
         connection = MuffledGatewayConnection(parameters, self.gateway_property)
         while True:
             connection_success = False
@@ -98,9 +102,11 @@ class SlowGatewayClient(GatewayClient):
 class MuffledGatewayConnection(GatewayConnection):
     def start(self):
         try:
+            log.info('%s is trying to connect to %s:%d', self.__class__.__name__, self.address, self.port)
             self.socket.connect((self.address, self.port))
             self.is_connected = True
             self.stream = self.socket.makefile('rb', 0)
+            log.info('%s is now connected to the Java server', self.__class__.__name__)
         except Exception:
             msg = 'An error occurred while trying to connect to the Java '\
                             'server'
@@ -192,7 +198,7 @@ class LdapServer(object):
             SERVER_PROCESS = run_jvm_server(java_gateway_port)
 
         if JVM_GATEWAY is None:
-            JVM_GATEWAY = run_jvm_gateway(python_proxy_port)
+            JVM_GATEWAY = run_jvm_gateway(java_gateway_port, python_proxy_port)
 
         self.server = JVM_GATEWAY.entry_point
         self.config, self._config_obj = \
